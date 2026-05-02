@@ -5,9 +5,6 @@ log = open('hotelLog.txt', 'a')
 
 '''
 To do:
-- finish Confirmation() to reservation
-- finish Receipt() to reservation
-- add Employee methods
 - add proper documentation (i hate doing this)
 - add readme
 '''
@@ -107,12 +104,18 @@ class Reservation:
         self.Save()
 
     def Confirm(self):
-        # create confirmation document for guest
-        pass
+        if self.id is None:
+            return
+        conf = open(f'confirmation_{self.id}.txt', 'w')
+        conf.write(f'Confirmation {self.id}\n{self.status}\n\n{self.guest_name}\n{self.guest_number}\n{self.guest_email}\n\n\n{self.room.number}\n{self.checkin_date} to {self.checkout_date} ({self.nights} nights)\nPayment type: {self.payment_type}\nTotal: {self.total}')
+        conf.close()
 
     def Receipt(self):
-        # create receipt for guest
-        pass
+        if self.id is None:
+            return
+        receipt = open(f'receipt_{self.id}.txt', 'w')
+        receipt.write(f'Receipt {self.id}\n\n{self.guest_name}\n{self.guest_number}\n{self.guest_email}\n\n\n{self.room.number}\n{self.checkin_date} to {self.checkout_date} ({self.nights} nights)\nPayment type: {self.payment_type}\nTotal: {self.total}')
+        receipt.close()
 
     def Save(self):
         con = connect_db()
