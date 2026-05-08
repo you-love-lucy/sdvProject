@@ -1,333 +1,386 @@
-# This is the code I have so far this is using the information provided in the classes.py 
-# This code all creates just one window so far and it allows you to create a reservation, store it, check in, and check out.
-# Later on I plan to make it to where you can have multiple windows and integrate SQL to store all this information in a database. 
-
-
-
+from datetime import date, datetime
 import tkinter as tk
 from tkinter import ttk, messagebox
-from datetime import datetime, date
+import sqlite3
 
-# -------------------- ROOM CLASS -------------------- #
+
+
+
+def connect_db():
+    con = sqlite3.connect("hotel.db")
+    con.execute("PRAGMA foreign_keys = ON")
+    return con
+
+
+
+
+def create_tables():
+    con = connect_db()
+    cur = con.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS rooms (
+            room_num INTEGER PRIMARY KEY,
+            price REAL,
+            type TEXT,
+            assigned INTEGER,
+            occupied INTEGER,
+            clean INTEGER
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS reservations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_num INTEGER,
+            guest_name TEXT,
+            guest_number TEXT,
+            guest_email TEXT,
+            checkin_date TEXT,
+            checkout_date TEXT,
+            nights INTEGER,
+            payment_type TEXT,
+            status TEXT,
+            price REAL,
+            FOREIGN KEY(room_num) REFERENCES rooms(room_num)
+        )
+    """)
+
+    con.commit()
+    con.close()
+
+
+def insert_rooms():
+    con = connect_db()
+    cur = con.cursor()
+
+    rooms = [
+        (101, 80.00, 'QQ', 0, 0, 1),
+        (102, 80.00, 'QQ', 0, 0, 1),
+        (103, 80.00, 'QQ', 0, 0, 1),
+        (104, 80.00, 'QQ', 0, 0, 1),
+        (105, 80.00, 'QQ', 0, 0, 1),
+        (106, 80.00, 'QQ', 0, 0, 1),
+        (201, 90.00, 'K', 0, 0, 1),
+        (202, 90.00, 'K', 0, 0, 1),
+        (203, 90.00, 'K', 0, 0, 1),
+        (204, 90.00, 'K', 0, 0, 1),
+        (205, 90.00, 'K', 0, 0, 1),
+        (206, 90.00, 'K', 0, 0, 1)
+    ]
+
+    existing = cur.execute("SELECT room_num FROM rooms").fetchall()
+    existing = [r[0] for r in existing]
+
+    for r in rooms:
+        if r[0] not in existing:
+            cur.execute("INSERT INTO rooms VALUES (?, ?, ?, ?, ?, ?)", r)
+
+    con.commit()
+    con.close()
+
+
+def get_rooms(Room):
+    con = connect_db()
+    cur = con.cursor()
+
+    rooms = {}
+
+    for r in cur.execute("SELECT * FROM rooms"):
+        rooms[r[0]] = Room(r[0], r[1], r[2])
+        rooms[r[0]].assigned = bool(r[3])
+
+    con.close()
+    return rooms
+
+
+
+
 class Room:
-    def __init__(self, number: int, price: float, r_type: str):
+    def __init__(self, number, price, room_type):
         self.number = number
         self.price = price
-        self.type = r_type
+        self.type = room_type
         self.assigned = False
-        self.occupied = False
-        self.clean = True
-
-    def _set_clean(self):
-        self.clean = True
 
 
-# -------------------- RESERVATION CLASS -------------------- #
+
+
 class Reservation:
-    def __init__(self, rooms):
-        self.rooms = rooms
+    def __init__(self):
+        self.rooms = get_rooms(Room)
         self.room = None
-        self.guest_name = ""
-        self.guest_number = ""
-        self.guest_email = ""
-        self.checkin_date = date.today()
-        self.checkout_date = date.today()
         self.nights = 0
-        self.payment_type = 'Cash'
-        self.payments = ['Cash', 'Credit Card', 'Debit Card', 'Bill']
-        self.status = 'In Progress'
-        self.price = 0.0
-        self.total = 0.0
-        
-    # ----------- Public Methods ----------- #
-    def Create(self, room_num, guest_name, guest_number,
-               guest_email, checkin_date, checkout_date, payment_type):
-        self._add_room(room_num)
+        self.price = 0
+        self.total = 0
+
+    def Create(self, room_num, name, phone, email, checkin, checkout, payment):
+
+        if room_num not in self.rooms:
+            raise ValueError("Invalid room")
+
+        self.room = self.rooms[room_num]
+
+        if self.room.assigned:
+            raise ValueError("Room already booked")
+
         self.price = self.room.price
-        self._add_name(guest_name)
-        self._add_number(guest_number)
-        self._add_email(guest_email)
-        self._set_checkin(checkin_date)
-        self._set_checkout(checkout_date)
-        self._get_nights()
-        self._set_payment(payment_type)
-        self.status = 'Confirmed'
+
+        self.nights = (checkout - checkin).days
+        if self.nights <= 0:
+            raise ValueError("Invalid dates")
+
         self.total = self.nights * self.price
 
-    def Cancel(self):
-        self.status = 'Cancelled'
-        if self.room:
-            self.room.assigned = False
+        con = connect_db()
+        cur = con.cursor()
 
-    def Checkin(self):
-        if self.room is None:
-            raise ValueError('No room assigned.')
-        if not self.room.clean:
-            raise ValueError('Assigned room not clean.')
-        self.status = 'In House'
-        self.room.occupied = True
+        cur.execute("""
+            INSERT INTO reservations (
+                room_num, guest_name, guest_number, guest_email,
+                checkin_date, checkout_date, nights,
+                payment_type, status, price
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            room_num, name, phone, email,
+            str(checkin), str(checkout),
+            self.nights, payment,
+            "Confirmed", self.total
+        ))
 
-    def Checkout(self):
-        self.status = 'Out'
-        if self.room:
-            self.room.assigned = False
-            self.room.clean = False
-            self.room.occupied = False
+        cur.execute(
+            "UPDATE rooms SET assigned=1 WHERE room_num=?",
+            (room_num,)
+        )
 
-    def Confirm(self):
-        """Generate a confirmation text file."""
-        if self.status != 'Confirmed':
-            raise ValueError("Reservation must be confirmed first.")
-
-        filename = f"Confirmation_Room{self.room.number}_{self.guest_name}.txt"
-        with open(filename, "w") as f:
-            f.write("HOTEL RESERVATION CONFIRMATION\n")
-            f.write("-" * 40 + "\n")
-            f.write(f"Guest Name: {self.guest_name}\n")
-            f.write(f"Phone: {self.guest_number}\n")
-            f.write(f"Email: {self.guest_email}\n")
-            f.write(f"Room Number: {self.room.number}\n")
-            f.write(f"Room Type: {self.room.type}\n")
-            f.write(f"Check-in: {self.checkin_date}\n")
-            f.write(f"Check-out: {self.checkout_date}\n")
-            f.write(f"Nights: {self.nights}\n")
-            f.write(f"Price per Night: ${self.price:.2f}\n")
-            f.write(f"Total Cost: ${self.total:.2f}\n")
-            f.write(f"Payment Type: {self.payment_type}\n")
-            f.write("-" * 40 + "\n")
-            f.write("Thank you for choosing our hotel!\n")
-        return filename
-
-    def Receipt(self):
-        """Generate a receipt text file."""
-        if self.status not in ['In House', 'Out']:
-            raise ValueError("Guest must be checked in or out to generate a receipt.")
-
-        filename = f"Receipt_Room{self.room.number}_{self.guest_name}.txt"
-        with open(filename, "w") as f:
-            f.write("HOTEL PAYMENT RECEIPT\n")
-            f.write("-" * 40 + "\n")
-            f.write(f"Guest Name: {self.guest_name}\n")
-            f.write(f"Room Number: {self.room.number}\n")
-            f.write(f"Stay: {self.checkin_date} to {self.checkout_date}\n")
-            f.write(f"Nights: {self.nights}\n")
-            f.write(f"Total Paid: ${self.total:.2f}\n")
-            f.write(f"Payment Method: {self.payment_type}\n")
-            f.write(f"Status: {self.status}\n")
-            f.write("-" * 40 + "\n")
-            f.write("We appreciate your stay with us!\n")
-        return filename
-
-    # ----------- Helper Methods ----------- #
-    def _add_room(self, room_number):
-        if room_number not in self.rooms:
-            raise ValueError('Not a valid room number.')
-        room = self.rooms[room_number]
-        if room.assigned:
-            raise ValueError('Room already assigned.')
-        self.room = room
-        room.assigned = True
-
-    def _add_name(self, name):
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError('Not a valid name.')
-        self.guest_name = name.strip()
-
-    def _add_number(self, number):
-        if not isinstance(number, str) or not number.strip():
-            raise ValueError('Not a valid phone number.')
-        self.guest_number = number.strip()
-
-    def _add_email(self, email):
-        if not isinstance(email, str) or '@' not in email:
-            raise ValueError('Not a valid email address.')
-        self.guest_email = email.strip()
-
-    def _set_checkin(self, checkin):
-        if not isinstance(checkin, date):
-            raise ValueError('Not a valid check-in date.')
-        self.checkin_date = checkin
-
-    def _set_checkout(self, checkout):
-        if not isinstance(checkout, date):
-            raise ValueError('Not a valid check-out date.')
-        self.checkout_date = checkout
-
-    def _get_nights(self):
-        nights = (self.checkout_date - self.checkin_date).days
-        if nights <= 0:
-            raise ValueError('Checkout must be after check-in.')
-        self.nights = nights
-
-    def _set_payment(self, payment):
-        if payment not in self.payments:
-            raise ValueError('Payment type not valid.')
-        self.payment_type = payment
+        con.commit()
+        con.close()
 
 
-# -------------------- ROOMS DATA -------------------- #
-rooms = {
-    101: Room(101, 80.00, 'QQ'),
-    102: Room(102, 80.00, 'QQ'),
-    103: Room(103, 80.00, 'QQ'),
-    104: Room(104, 80.00, 'QQ'),
-    105: Room(105, 80.00, 'QQ'),
-    106: Room(106, 80.00, 'QQ'),
-    201: Room(201, 90.00, 'K'),
-    202: Room(202, 90.00, 'K'),
-    203: Room(203, 90.00, 'K'),
-    204: Room(204, 90.00, 'K'),
-    205: Room(205, 90.00, 'K'),
-    206: Room(206, 90.00, 'K')
-}
 
-# Create a reservation instance
-current_reservation = Reservation(rooms)
 
-# -------------------- GUI FUNCTIONS -------------------- #
-def update_room_list():
-    available = [num for num, room in rooms.items() if not room.assigned]
-    room_combo['values'] = available
-    if available:
-        room_var.set(available[0])
-    else:
-        room_var.set("")
+create_tables()
+insert_rooms()
 
-def create_reservation():
+
+# =====================================================
+# GUI FUNCTIONS
+# =====================================================
+
+def save_reservation():
     try:
-        room_num = int(room_var.get())
-        checkin = datetime.strptime(checkin_entry.get(), "%Y-%m-%d").date()
-        checkout = datetime.strptime(checkout_entry.get(), "%Y-%m-%d").date()
+        res = Reservation()
 
-        current_reservation.Create(
-            room_num,
+        res.Create(
+            int(room_var.get()),
             name_entry.get(),
             phone_entry.get(),
             email_entry.get(),
-            checkin,
-            checkout,
+            datetime.strptime(checkin_entry.get(), "%Y-%m-%d").date(),
+            datetime.strptime(checkout_entry.get(), "%Y-%m-%d").date(),
             payment_var.get()
         )
 
-        messagebox.showinfo(
-            "Success",
-            f"Reservation confirmed!\nTotal: ${current_reservation.total:.2f}"
-        )
-        update_room_list()
+        messagebox.showinfo("Success", "Reservation Created")
+
+        clear_fields()
+        show_reservations()
 
     except Exception as e:
         messagebox.showerror("Error", str(e))
+
+
+def clear_fields():
+    name_entry.delete(0, tk.END)
+    phone_entry.delete(0, tk.END)
+    email_entry.delete(0, tk.END)
+    checkin_entry.delete(0, tk.END)
+    checkout_entry.delete(0, tk.END)
+
 
 def cancel_reservation():
-    try:
-        current_reservation.Cancel()
-        messagebox.showinfo("Cancelled", "Reservation cancelled.")
-        update_room_list()
-    except Exception as e:
-        messagebox.showerror("Error", str(e))
+    rid = cancel_entry.get()
 
-def checkin_guest():
-    try:
-        current_reservation.Checkin()
-        messagebox.showinfo("Check-in", "Guest checked in.")
-    except Exception as e:
-        messagebox.showerror("Error", str(e))
+    con = connect_db()
+    cur = con.cursor()
 
-def checkout_guest():
-    try:
-        current_reservation.Checkout()
-        messagebox.showinfo("Check-out", "Guest checked out.")
-        update_room_list()
-    except Exception as e:
-        messagebox.showerror("Error", str(e))
+    cur.execute("SELECT room_num FROM reservations WHERE id=?", (rid,))
+    row = cur.fetchone()
 
-def generate_confirmation():
-    try:
-        filename = current_reservation.Confirm()
-        messagebox.showinfo("Confirmation", f"Created: {filename}")
-    except Exception as e:
-        messagebox.showerror("Error", str(e))
+    if not row:
+        messagebox.showerror("Error", "Not found")
+        return
 
-def generate_receipt():
-    try:
-        filename = current_reservation.Receipt()
-        messagebox.showinfo("Receipt", f"Created: {filename}")
-    except Exception as e:
-        messagebox.showerror("Error", str(e))
+    cur.execute(
+        "UPDATE reservations SET status='Cancelled' WHERE id=?",
+        (rid,)
+    )
 
-# -------------------- GUI LAYOUT -------------------- #
+    cur.execute(
+        "UPDATE rooms SET assigned=0 WHERE room_num=?",
+        (row[0],)
+    )
+
+    con.commit()
+    con.close()
+
+    messagebox.showinfo("Cancelled", "Reservation Cancelled")
+
+
+def show_reservations():
+    top = tk.Toplevel(root)
+    top.title("Reservations")
+    top.geometry("900x400")
+
+    tree = ttk.Treeview(
+        top,
+        columns=("ID","Room","Name","Phone","Email","In","Out","N","Pay","Status","Total"),
+        show="headings"
+    )
+
+    for c in tree["columns"]:
+        tree.heading(c, text=c)
+        tree.column(c, width=80)
+
+    con = connect_db()
+    cur = con.cursor()
+
+    cur.execute("SELECT * FROM reservations")
+    for r in cur.fetchall():
+        tree.insert("", tk.END, values=r)
+
+    con.close()
+
+    tree.pack(fill="both", expand=True)
+
+# Create main application window
 root = tk.Tk()
+
+# Set window title
 root.title("Hotel Booking System")
-root.geometry("500x550")
+
+# Set window size
+root.geometry("550x650")
+
+# Set background color
+root.configure(bg="black")
+
+# Prevent resizing window
 root.resizable(False, False)
 
-title = tk.Label(root, text="Hotel Booking System",
-                 font=("Helvetica", 18, "bold"))
-title.pack(pady=10)
 
-frame = tk.Frame(root)
-frame.pack(padx=20, pady=10)
+# ---------------- TITLE LABEL ----------------
+# Displays main system title at top of window
+tk.Label(
+    root,
+    text="Hotel Booking System",
+    font=("Arial", 18, "bold"),
+    fg="white",
+    bg="black"
+).pack(pady=10)
 
+
+# ---------------- INPUT FRAME ----------------
+# Holds all user input fields in a structured layout
+frame = tk.Frame(root, bg="black")
+frame.pack()
+
+
+# Labels for input fields
 labels = [
-    "Guest Name", "Phone Number", "Email",
-    "Room Number", "Check-in (YYYY-MM-DD)",
-    "Check-out (YYYY-MM-DD)", "Payment Type"
+    "Name",
+    "Phone",
+    "Email",
+    "Room",
+    "Check-in (YYYY-MM-DD)",
+    "Check-out (YYYY-MM-DD)",
+    "Payment"
 ]
 
+
+# Create labels in GUI
 for i, text in enumerate(labels):
-    tk.Label(frame, text=text).grid(row=i, column=0, sticky="w", pady=5)
+    tk.Label(frame, text=text, fg="white", bg="black").grid(row=i, column=0, sticky="w")
+
+
+# ---------------- ENTRY FIELDS ----------------
+# User input fields for guest information
 
 name_entry = tk.Entry(frame)
 phone_entry = tk.Entry(frame)
 email_entry = tk.Entry(frame)
-
-room_var = tk.StringVar()
-room_combo = ttk.Combobox(frame, textvariable=room_var, state="readonly")
-
 checkin_entry = tk.Entry(frame)
-checkin_entry.insert(0, date.today().strftime("%Y-%m-%d"))
-
 checkout_entry = tk.Entry(frame)
-checkout_entry.insert(0, date.today().strftime("%Y-%m-%d"))
 
+
+# Room dropdown selection
+room_var = tk.StringVar()
+room_combo = ttk.Combobox(
+    frame,
+    textvariable=room_var,
+    values=list(get_rooms(Room).keys()),
+    state="readonly"
+)
+
+
+# Payment dropdown selection
 payment_var = tk.StringVar(value="Cash")
 payment_combo = ttk.Combobox(
     frame,
     textvariable=payment_var,
-    values=current_reservation.payments,
+    values=["Cash", "Credit Card", "Debit Card", "Bill"],
     state="readonly"
 )
 
+
+# Place input widgets in grid layout
 widgets = [
-    name_entry, phone_entry, email_entry,
-    room_combo, checkin_entry, checkout_entry,
+    name_entry,
+    phone_entry,
+    email_entry,
+    room_combo,
+    checkin_entry,
+    checkout_entry,
     payment_combo
 ]
 
-for i, widget in enumerate(widgets):
-    widget.grid(row=i, column=1, pady=5)
+for i, w in enumerate(widgets):
+    w.grid(row=i, column=1)
 
-button_frame = tk.Frame(root)
-button_frame.pack(pady=20)
 
-buttons = [
-    ("Create Reservation", create_reservation, "#4CAF50"),
-    ("Cancel Reservation", cancel_reservation, "#F44336"),
-    ("Check In", checkin_guest, "#2196F3"),
-    ("Check Out", checkout_guest, "#9C27B0"),
-    ("Generate Confirmation", generate_confirmation, None),
-    ("Generate Receipt", generate_receipt, None)
-]
+# ---------------- BUTTONS ----------------
 
-for i, (text, cmd, color) in enumerate(buttons):
-    tk.Button(
-        button_frame,
-        text=text,
-        command=cmd,
-        width=25,
-        bg=color if color else None,
-        fg="white" if color else None
-    ).grid(row=i, column=0, pady=5)
+# Creates reservation using input data
+tk.Button(
+    root,
+    text="Create Reservation",
+    command=save_reservation
+).pack(pady=10)
 
-update_room_list()
+
+# Opens reservation table window
+tk.Button(
+    root,
+    text="View Reservations",
+    command=show_reservations
+).pack()
+
+
+# ---------------- CANCEL SECTION ----------------
+# Input field to cancel reservation by ID
+
+cancel_entry = tk.Entry(root)
+cancel_entry.pack(pady=10)
+
+
+# Cancel reservation button
+tk.Button(
+    root,
+    text="Cancel Reservation",
+    command=cancel_reservation
+).pack()
+
+
+# ---------------- START APP ----------------
 root.mainloop()
